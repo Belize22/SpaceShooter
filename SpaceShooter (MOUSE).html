@@ -1,0 +1,1208 @@
+<!doctype HTML>
+<html>
+<head>
+	<style>
+		body{
+			background-color: black;
+		}
+		table{
+			border-style: solid;
+			border-width: 1px;
+			border-color: white;
+		}
+		
+		canvas.border {
+		background-image: url("background.png");
+		border-style: solid;
+		border-width: 1px;
+		border-color: RGB(255,200,0);
+		}
+		
+		#Speed{
+		height: 600px;
+		align: right;
+		display: inline-block;
+		}
+		#Rotation{
+		height: 600px;
+		align: right;
+		display: inline-block;
+		}
+		
+		span{
+			color: white;
+		}
+		
+	</style>
+	<script src="http://ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+	<script src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.10.3/jquery-ui.min.js"></script>
+	<script src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.11.2/jquery-ui.js"></script>
+	<link rel="stylesheet" type="text/css" href="http://ajax.googleapis.com/ajax/libs/jqueryui/1.7.1/themes/base/jquery-ui.css"/>
+	<script>
+	/*--------------------------------------------------------------------------------*\
+	|JAVASCRIPT CODE                                                                   |
+	\*--------------------------------------------------------------------------------*/
+	
+	/*----------------------------| CANVAS DIMENSIONS |---------------------------*/
+	//These constant values allow for easy modifications of the canvas dimensions
+	const STAGE_HEIGHT = 600;
+	const STAGE_WIDTH = 750;
+	/*----------------------------------------------------------------------------*/
+	
+	/*-----------------------------| SPAWN POINTS |-------------------------------*/
+	//These constant values affect where the players spawn.
+	
+	//Spawn point for Player 1 in Single Player mode.
+	const MAIN_SPAWN_X = (STAGE_WIDTH/2) - 32
+	const MAIN_SPAWN_Y = STAGE_HEIGHT - 42
+	
+	//These constant values determine where the enemies spawn.
+	const ENEMY_SPAWN_X = STAGE_WIDTH/2;
+	const ENEMY_SPAWN_Y = STAGE_HEIGHT/4;
+	/*----------------------------------------------------------------------------*/
+	
+	const TO_RADIANS = Math.PI/180;
+	const BULLET_LIMIT = 4;   //Limits amount of bullets on the canvas.
+	
+	/*---------------------------| ENEMY PROPERTIES |-----------------------------*/
+	var NUM_L1_ENEMIES = 8;   //Amount of enemies that spawn in the beginning of the game.
+	var NUM_L2_ENEMIES = 6;
+	var NUM_L3_ENEMIES = 5;
+	var NUM_L4_ENEMIES = 3;
+	
+	var REGEN_L1_ENEMIES = 5;  //Amount of enemies that respawn at once.
+	var REGEN_L2_ENEMIES = 4;
+	var REGEN_L3_ENEMIES = 3;
+	var REGEN_L4_ENEMIES = 2;
+	
+	var MIN_L1_ENEMIES = 5;    //If there are less enemies than this value, more enemies spawn.
+	var MIN_L2_ENEMIES = 3;
+	var MIN_L3_ENEMIES = 2;
+	var MIN_L4_ENEMIES = 1;
+	
+	const STARTING_L1_THRESHOLD = 0.75; //Maximum speed that each group of enemies can reach.
+	const STARTING_L2_THRESHOLD = 1.5;
+	const STARTING_L3_THRESHOLD = 2.25;
+	const STARTING_L4_THRESHOLD = 4;
+	
+	const L1_POINT_BASE = 100;  //Points earned by killing an enemy. The higher level enemy, the better the points given.
+	const L2_POINT_BASE = 250;
+	const L3_POINT_BASE = 500;
+	const L4_POINT_BASE = 2500;
+	
+	const D_RANK_REQUIREMENT = 5000;    //Have more than a certain requirement and you get that rank. E is default rank.
+	const C_RANK_REQUIREMENT = 10000;
+	const B_RANK_REQUIREMENT = 15000;
+	const A_RANK_REQUIREMENT = 21000;
+	const S_RANK_REQUIREMENT = 26000;
+	
+	const SLOW_ROTATION_SPEED = 2.5     //How fast the ship can rotate in it's different ship states.
+	const NORMAL_ROTATION_SPEED = 5;
+	const FAST_ROTATION_SPEED = 10;
+	
+	const SLOW_ROTATION_MULTIPLIER = 0.5;
+	const NORMAL_ROTATION_MULTIPLIER = 1;
+	const FAST_ROTATION_MULTIPLIER = 2;
+	
+	const SLOW_SPEED_MULTIPLIER = 0.5
+	const NORMAL_SPEED_MULTIPLIER = 1;
+	const FAST_SPEED_MULTIPLIER = 1.5;
+	
+	const SLOW_MAX_SPEED = 2.5;         //The max speeds the ship can reach in it's different ship states.
+	const NORMAL_MAX_SPEED = 5;
+	const FAST_MAX_SPEED = 7.5;
+	
+	const SLOW_DAMAGE_TAKEN = 1;        //How much of the ship's health is taken away in it's different states.
+	const NORMAL_DAMAGE_TAKEN = 2;
+	const FAST_DAMAGE_TAKEN = 4;
+	
+	const UNCONTROLLED_BULLET_SPEED = 20; //Remote-guided bullets are slower... So the player can control them efficiently.
+	const CONTROLLED_BULLET_SPEED = 10;
+	const TIME_INVINCIBLE = 1000;         //Player is invincible for 1 second after getting hit. Makes damage intake fair to deal with.
+	
+	/******************************************\
+	|        COORDINATES OF AMMO ZONE          |
+	|The area within it's coordinates          |
+	|regenerates ammo when their ammo is empty.|
+	\******************************************/
+	const AMMO_X_MIN = 23;
+	const AMMO_X_MAX = 86;
+	const AMMO_Y_MIN = 515;
+	const AMMO_Y_MAX = 578;
+	
+	const STARTING_TIME = 120;          //Ranked mode lasts 2 minutes long.
+	
+	var CURRENT_ROTATION_MULTIPLIER;
+	var CURRENT_SPEED_MULTIPLIER;
+	var MAX_AMMO;                       //Maximum ammo the ship can carry. Changes depending on game mode.
+	var SPEED_INCREASE_RATE;            //The rate newly spawned enemies increase their threshold. The lower the number,
+										//the faster they do so.
+	var STARTING_HEALTH;                //The amount of health the player starts with. Changes depending on game mode.
+	
+	var jx;                  //Current row of overall spritesheet.
+	var jy;                  //Current column of overall spritesheet.
+	var jcount = 0;          //Current frame of spritesheet.
+	var ctx;                 //Context required to maintain a canvas.
+	var player1;             //The ship player 1 controls.
+	var p1Bullets = [];      //All bullets that belong to player 1.
+	var enemiesL1 = [];      //All opponents of the game in the canvas.
+	var enemiesL2 = []; 
+	var enemiesL3 = []; 
+	var enemiesL4 = []; 
+	var myInterval;          //Maintains motion of every object in this game.
+	var canvasSize;          //Size of game. Preset size: WIDTH: 750, HEIGHT: 600
+	var controlBulletFired = false;
+	var preload = ["smallship.png", "smallalienL1.png", "smallalienL2.png", 
+			      "smallalienL3.png", "smallalienL4.png", "smallbullet.png",
+				  "smallshipspread.png", "smallshipcontrol.png", "speedship.png",
+				  "speedshipspread.png", "speedshipcontrol.png", "defship.png",
+				  "defshipspread.png", "defshipcontrol.png",
+				  "instructionsmouse.png", "gameovermouse.png"];   // any order.
+	var soundlist = ["gunshot.mp3", "shiphit.wav", "enemyhit.wav"];
+	var soundtrack = ["19. Character Select.mp3", "9. Eschebone.mp3", "13. Asteroid.mp3", "12. Water Ruin.mp3"];
+	var promises = [];
+	var invincibilityFrame = false;   //Player takes no damage if this is activated. True for 1 second if hit.
+	var changeMusic = false;
+	var killCount;                    //Amount of enemies killed. Affects the points earned and threshold of enemies.
+	var gunfire;                      //Ship bullet sound.
+	var playerhit;                    //Ship gets hit sound.
+	var enemyhit;                     //Enemy gets hit sound.
+	var musicState;                   //Number of current song being played in soundtrack directory.
+	var instructionsScreen = new Image(); //The "splash screen".
+	instructionsScreen.src = preload[14]; //Image of Splash screen.
+	var gameover = new Image();           //The game over screen.
+	gameover.src = preload[15];	          //Image of Splash screen.
+	var gamemode;                         //The game mode. It's either Easy, Normal, Hard or Ranked.
+	var gamestate;                        //Game state. Either on Instructions screen, The game itself or the game over screen.
+	var score;                            //Score earned during the game.
+	var finalScore;                       //Total score after ranked mode ends. Health remaining and time elapsed increase this.
+	var health;                           //Player 1's health.
+	var timeLeft;                         //How much time is left in ranked mode.
+	var quitGame; //Boolean that prevents displaying final score if the person purposefully quit the game.
+	var speedFactor;
+	var rotationFactor;
+	music = new Audio();                  //Current song playing.
+	gunfire = new Audio(); 
+	playerhit = new Audio();
+	enemyhit = new Audio();
+	enemyhit.src = soundlist[2];
+	playerhit.src = soundlist[1];
+	gunfire.src = soundlist[0];
+	music.src = soundtrack[0];       //The audio properties used here (and more) was found at:
+	music.play();                         //http://www.w3schools.com/tags/ref_av_dom.asp
+	music.loop = true;
+	music.volume = 0.2;
+	
+	function init()
+	{		
+		for (var i = 0; i < preload.length; i++) {
+			(function(url, promise) {
+				var img = new Image();
+				img.onload = function() {
+				  promise.resolve();
+				};
+				img.src = url;
+			})(preload[i], promises[i] = $.Deferred());
+		}
+		
+		ctx = document.getElementById("myCanvas").getContext("2d");
+		canvasSize = document.getElementById("myCanvas");
+		
+		$("#myCanvas").attr("width", STAGE_WIDTH);   //Sets width of canvas to the constant value STAGE_WIDTH.
+		$("#myCanvas").attr("height", STAGE_HEIGHT); //Sets heighy of canvas to the constant value STAGE_HEIGHT.
+		$("#GAMEeasy").click(function() {gamemode = "easy"; startgame();});
+		$("#GAMEnormal").click(function() {gamemode = "normal"; startgame();});
+		$("#GAMEhard").click(function() {gamemode = "hard"; startgame();});
+		$("#GAMEranked").click(function() {gamemode = "ranked"; startgame();});
+		$("#SHIPreg").click(changetoReg);
+		$("#SHIPspd").click(changetoSpeed);
+		$("#SHIPdef").click(changetoDef);
+		$("#BULLETreg").click(changetoNormal);
+		$("#BULLETspr").click(changetoSpread);
+		$("#BULLETrem").click(changetoControl);
+		$("#MUSICone").click(function() { music.src = soundtrack[1]; music.currentTime = 0; music.play(); musicState = 1});
+		$("#MUSICtwo").click(function() { music.src = soundtrack[2]; music.currentTime = 0; music.play(); musicState = 2});
+		$("#MUSICthree").click(function() { music.src = soundtrack[3]; music.currentTime = 0; music.play(); musicState = 3});
+		$("#SHOOT").click(fireBullet);
+		$("#QUIT").click(function() {quitGame = true;           //Induces a game over. Displays "Mission Aborted" if you do this!
+									if (gamemode == "ranked")
+										finalTime = timeLeft;
+									player1 = delete GunShip;}); 
+		$("#BCKtoMAIN").click(instructions);
+		$("#SHIPreg").prop("disabled", true)
+		$("#SHIPspd").prop("disabled", true)
+		$("#SHIPdef").prop("disabled", true)
+		$("#BULLETreg").prop("disabled", true)
+		$("#BULLETspr").prop("disabled", true)
+		$("#MUSICone").prop("disabled", true)
+		$("#MUSICtwo").prop("disabled", true)
+		$("#MUSICthree").prop("disabled", true)
+		$("#BULLETrem").prop("disabled", true)
+		$("#SHOOT").prop("disabled", true)
+		$("#QUIT").prop("disabled", true)
+		$.when.apply($, promises).done(function() {	 // this is the callback when pre-loads are done
+		 // Here is where you can begin your name
+		 //$(document).keydown(processKey);            // Sets game controls.
+		 instructions();                             // Start on splash screen.
+		  //startgame();
+		});
+	};
+	
+	$(function() {
+			$( "#Rotation" ).slider({disabled: "true", orientation: "vertical", min: -5, max: 5, value:0, slide: function(event, ui){rotationFactor = ui.value}});
+			$( "#Speed" ).slider({disabled: "true", orientation: "vertical", min: 0, max: 5, value:0, slide: function(event, ui){speedFactor = ui.value}});
+	});
+	
+	//DISPLAY INSTRUCTIONS SCREEN.
+	function instructions()
+	{
+		$("#GAMEeasy").prop("disabled", false)
+		$("#GAMEnormal").prop("disabled", false)
+		$("#GAMEhard").prop("disabled", false)
+		$("#GAMEranked").prop("disabled", false)
+		$("#BCKtoMAIN").prop("disabled", true)
+		gamestate = "instructions";
+		ctx.drawImage (instructionsScreen, 0, 0); //Display splash screen.
+	}
+	
+	//PLAY THE ACTUAL GAME.
+	function startgame()
+	{
+		$("#GAMEeasy").prop("disabled", true)
+		$("#GAMEnormal").prop("disabled", true)
+		$("#GAMEhard").prop("disabled", true)
+		$("#GAMEranked").prop("disabled", true)
+		$("#SHIPreg").prop("disabled", false)
+		$("#SHIPspd").prop("disabled", false)
+		$("#SHIPdef").prop("disabled", false)
+		$("#BULLETreg").prop("disabled", false)
+		$("#BULLETspr").prop("disabled", false)
+		$("#MUSICone").prop("disabled", false)
+		$("#MUSICtwo").prop("disabled", false)
+		$("#MUSICthree").prop("disabled", false)
+		$("#BULLETrem").prop("disabled", false)
+		$("#SHOOT").prop("disabled", false)
+		$("#QUIT").prop("disabled", false)
+		
+		rotationFactor = 0;
+		speedFactor = 0;
+		CURRENT_SPEED_MULTIPLIER = NORMAL_SPEED_MULTIPLIER;
+		CURRENT_ROTATION_MULTIPLIER = NORMAL_ROTATION_MULTIPLIER;
+		
+		$( "#Speed" ).slider( "enable" );
+		$( "#Rotation" ).slider( "enable" );
+		score = 0;                                     //Current score.
+		$("#Score").css("color", "rgb(255,255,255)");  //Set score color to white.
+		quitGame = false;                              //Didn't quit the game yet...
+		killCount = 0;                                 //Didn't kill anybody yet...
+		gamestate = "game-play";
+		if (gamemode == "easy")                        //EASY MODE SETTINGS
+		{
+			health = 100;
+			MAX_AMMO = 250;
+			SPEED_INCREASE_RATE = 15;
+			
+			NUM_L1_ENEMIES = 6;   //Amount of enemies that spawn in the beginning of the game.
+			NUM_L2_ENEMIES = 4;
+			NUM_L3_ENEMIES = 2;
+			NUM_L4_ENEMIES = 2;
+			
+			REGEN_L1_ENEMIES = 3;  //Amount of enemies that respawn at once.
+			REGEN_L2_ENEMIES = 2;
+			REGEN_L3_ENEMIES = 1;
+			REGEN_L4_ENEMIES = 1;
+			
+			MIN_L1_ENEMIES = 4;    //If there are less enemies than this value, more enemies spawn.
+			MIN_L2_ENEMIES = 2;
+			MIN_L3_ENEMIES = 1;
+			MIN_L4_ENEMIES = 1;
+		}
+		else if (gamemode == "normal" || gamemode == "ranked") //NORMAL AND RANKED MODE SETTINGS.
+		{
+			health = 75;
+			MAX_AMMO = 200;
+			SPEED_INCREASE_RATE = 10;
+			
+			NUM_L1_ENEMIES = 6;   //Amount of enemies that spawn in the beginning of the game.
+			NUM_L2_ENEMIES = 5;
+			NUM_L3_ENEMIES = 3;
+			NUM_L4_ENEMIES = 2;
+			
+			REGEN_L1_ENEMIES = 4;  //Amount of enemies that respawn at once.
+			REGEN_L2_ENEMIES = 3;
+			REGEN_L3_ENEMIES = 2;
+			REGEN_L4_ENEMIES = 1;
+			
+			MIN_L1_ENEMIES = 4;    //If there are less enemies than this value, more enemies spawn.
+			MIN_L2_ENEMIES = 3;
+			MIN_L3_ENEMIES = 2;
+			MIN_L4_ENEMIES = 1;
+			
+			if (gamemode == "ranked")  //The only difference between Normal and Ranked is the time limit.
+				timeLeft = STARTING_TIME;
+		}
+		else if (gamemode == "hard") //HARD MODE SETTINGS.
+		{
+			health = 50;
+			MAX_AMMO = 150;
+			SPEED_INCREASE_RATE = 5;
+			
+			NUM_L1_ENEMIES = 8;   //Amount of enemies that spawn in the beginning of the game.
+			NUM_L2_ENEMIES = 6;
+			NUM_L3_ENEMIES = 5;
+			NUM_L4_ENEMIES = 3;
+			
+			REGEN_L1_ENEMIES = 5;  //Amount of enemies that respawn at once.
+			REGEN_L2_ENEMIES = 4;
+			REGEN_L3_ENEMIES = 3;
+			REGEN_L4_ENEMIES = 2;
+			
+			MIN_L1_ENEMIES = 5;    //If there are less enemies than this value, more enemies spawn.
+			MIN_L2_ENEMIES = 3;
+			MIN_L3_ENEMIES = 2;
+			MIN_L4_ENEMIES = 1;
+		}
+		//SPAWN PLAYER ON BOTTOM HALF OF THE STAGE.
+		player1 = new GunShip(MAIN_SPAWN_X, MAIN_SPAWN_Y, NORMAL_ROTATION_SPEED, NORMAL_DAMAGE_TAKEN, MAX_AMMO); //Spawns the ship player 1 controls in the game.
+		
+		//SPAWN ALL STARTING ENEMIES IN TOP HALF OF STAGE.
+		for (var i = 0; i < NUM_L1_ENEMIES; i++)
+			enemiesL1.push(new Enemies((Math.random() * STAGE_WIDTH), (Math.random() * STAGE_HEIGHT/3), STARTING_L1_THRESHOLD, preload[1]));
+		for (var i = 0; i < NUM_L2_ENEMIES; i++)
+			enemiesL2.push(new Enemies((Math.random() * STAGE_WIDTH), (Math.random() * STAGE_HEIGHT/3), STARTING_L2_THRESHOLD, preload[2]));
+		for (var i = 0; i < NUM_L3_ENEMIES; i++)
+			enemiesL3.push(new Enemies((Math.random() * STAGE_WIDTH), (Math.random() * STAGE_HEIGHT/3), STARTING_L3_THRESHOLD, preload[3]));
+		for (var i = 0; i < NUM_L4_ENEMIES; i++)
+			enemiesL4.push(new Enemies((Math.random() * STAGE_WIDTH), (Math.random() * STAGE_HEIGHT/3), STARTING_L4_THRESHOLD, preload[4]));
+		//draw();
+		//$(document).keydown(processKey);      //Used for controls of the player.
+		myInterval = setInterval(draw, 30);     //Start the interval. Changes picture every 0.03 seconds.
+		
+		music.src = soundtrack[1];              //Starting music is first of three gameplay songs.
+		music.currentTime = 0;                  //Start at beginning.
+		music.play();                           
+		musicState = 1;                         //Number associated with song.
+	}
+	
+	function gameOver()
+	{
+		if (player1)                            //Induce game over if person quit game on purpose.
+			player1 = delete GunShip;
+		
+		$( "#Speed" ).slider( "disable" );
+		$( "#Speed" ).slider( "value", 0 );
+		$( "#Rotation" ).slider( "disable" );
+		$( "#Rotation" ).slider( "value", 0 );
+		
+		gamestate = "game-over";
+		
+		$("#BCKtoMAIN").prop("disabled", false)
+		$("#SHIPreg").prop("disabled", true)
+		$("#SHIPspd").prop("disabled", true)
+		$("#SHIPdef").prop("disabled", true)
+		$("#BULLETreg").prop("disabled", true)
+		$("#BULLETspr").prop("disabled", true)
+		$("#MUSICone").prop("disabled", true)
+		$("#MUSICtwo").prop("disabled", true)
+		$("#MUSICthree").prop("disabled", true)
+		$("#BULLETrem").prop("disabled", true)
+		$("#SHOOT").prop("disabled", true)
+		$("#QUIT").prop("disabled", true)
+		
+		//BLANK ALL GAMEPLAY INFORMATION DISPLAYED.
+		$('#spdfactor').html("");
+		$('#rtnfactor').html("");
+		$('#Health').html("");
+		$('#Ammunition').html("");
+		$('#Timer').html("");
+		$('#Score').html("");
+		$('#Type').html("");
+		$('#BulletType').html("");
+		$('#Soundtrack').html("");
+		
+		music.src = soundtrack[0];                 //Change back to main-menu song.
+		music.currentTime = 0;                     //Start at beginning.
+		music.play();
+		
+		//DELETE ALL REMAINING ENEMIES.
+		for (var i = enemiesL1.length - 1; i >= 0; i--)
+			enemiesL1.splice(i, 1);
+		for (var i = enemiesL2.length - 1; i >= 0; i--)
+			enemiesL2.splice(i, 1);
+		for (var i = enemiesL3.length - 1; i >= 0; i--)
+			enemiesL3.splice(i, 1);
+		for (var i = enemiesL4.length - 1; i >= 0; i--)
+			enemiesL4.splice(i, 1);
+		for (var i = p1Bullets.length - 1; i >= 0; i--)
+			p1Bullets.splice(i, 1);
+			
+		clearInterval(myInterval);
+		ctx.drawImage (gameover, 0, 0);
+		
+		//DON'T DISPLAY SCORE IF THE PERSON QUIT THE GAME.
+		if (quitGame)
+		{
+			ctx.fillStyle = "red";              //http://www.w3schools.com/tags/canvas_filltext.asp
+			ctx.font = 'bold 28px Courier New';   //This is where the content concerning fillText comes from.
+			ctx.fillText('Mission Aborted!', 250, 250);
+		}
+		else //DISPLAY SCORE. THE USEE DIDN'T QUIT THE GAME.
+		{
+			ctx.fillStyle = "white";               //http://www.w3schools.com/tags/canvas_filltext.asp
+			ctx.font = 'bold 28px Courier New';   //This is where the content concerning fillText comes from.
+			if (gamemode != "ranked")
+				ctx.fillText('Points Earned: ' + score + ' points!', 150, 250); //Points earned killing enemies is final point score here.
+			else                                                                //Elaborate point system is used for ranked mode.
+			{
+				if (health < 0)
+					health = 0;
+				ctx.font = 'bold 20px Courier New';   //This is where the content concerning fillText comes from: http://www.w3schools.com/tags/canvas_filltext.asp
+				ctx.fillText('Health Remaining: ' + health + ' (Points: ' + health + ' * 50)', 50, 250); //Points earned based on health retained.
+				ctx.fillText('Time Remaining: ' + finalTime.toFixed(2)  + ' (Points: (120 - ' + finalTime.toFixed(2) + ') * 25)', 50, 280); //Points earned based on time elapsed.
+				ctx.fillText('Points Earned: ' + score + ' points!', 50, 310);   //Points earned based on enemies you killed.
+				finalScore = score + (health * 50) + ((Math.round(120 - finalTime)) * 25); //Cumulation on subtotals you earned based on health, time elapsed and kills.
+				ctx.font = 'bold 28px Courier New';
+				ctx.fillText('TOTAL POINTS: ' + finalScore + ' points!', 50, 340);         //Total Points earned.
+				
+				/**********************************************************\
+				|                        RANK DISPLAY.                     |
+				|This section displays the rank you got and a comment      |
+				|that varies on your rank!                                 |
+				\**********************************************************/
+				if (finalScore < D_RANK_REQUIREMENT)
+				{
+					ctx.fillStyle = "rgb(255, 0, 0)";
+					ctx.font = 'bold 35px Courier New';
+					ctx.fillText('RANK: E', 50, 420);
+					ctx.font = 'bold 15px Courier New';
+					ctx.fillText('A little effort can go a long way!', 50, 460);
+				}
+				else if (finalScore < C_RANK_REQUIREMENT)
+				{
+					ctx.fillStyle = "rgb(255, 128, 0)";
+					ctx.font = 'bold 35px Courier New';
+					ctx.fillText('RANK: D', 50, 420);
+					ctx.font = 'bold 15px Courier New';
+					ctx.fillText('You can achieve better if you chase after it!', 50, 460);
+				}
+				else if (finalScore < B_RANK_REQUIREMENT)
+				{
+					ctx.fillStyle = "rgb(0, 255, 0)";
+					ctx.font = 'bold 35px Courier New';
+					ctx.fillText('RANK: C', 50, 420);
+					ctx.font = 'bold 15px Courier New';
+					ctx.fillText('Good. Some decent effort was put here!', 50, 460);
+				}
+				else if (finalScore < A_RANK_REQUIREMENT)
+				{
+					ctx.fillStyle = "rgb(0, 0, 255)";
+					ctx.font = 'bold 35px Courier New';
+					ctx.fillText('RANK: B', 50, 420);
+					ctx.font = 'bold 15px Courier New';
+					ctx.fillText('You did a nice job!', 50, 460);
+				}
+				else if (finalScore < S_RANK_REQUIREMENT)
+				{
+					ctx.fillStyle = "rgb(210, 106, 255)";
+					ctx.font = 'bold 35px Courier New';
+					ctx.fillText('RANK: A', 50, 420);
+					ctx.font = 'bold 15px Courier New';
+					ctx.fillText('I must say, you did a pretty great job', 50, 460);
+				}
+				else
+				{
+					ctx.fillStyle = "rgb(255, 200, 0)";
+					ctx.font = 'bold 35px Courier New';
+					ctx.fillText('RANK: S', 50, 420);
+					ctx.font = 'bold 15px Courier New';
+					ctx.fillText('Spectacular! Your score is phenomenal!', 50, 460);
+				}
+			}
+		}
+	}
+	
+	function GunShip(dx, dy, ds, dd, da)
+	{
+		this.myImage = new Image();
+		this.myImage.src = preload[0];
+		this.x = dx;        //x position of where the ship spawns.
+		this.y = dy;        //y position of where the ship spawns.
+		this.speed = 0;     //Affects how fast ship goes while moving.
+		this.mydirection;   //Keeps track of direction chosen by player. The ship then
+		                    //Moves accordingly!
+		this.rotation = 45;  //Determines which direction the ship faces.
+		this.ammunition = da;   //Can't fire bullets if this reaches 0.
+		this.damagetaken = dd;  //The amount of health is taken away after getting hit.
+		this.rotationSpeed = ds; //How fast the ship rotates.
+		this.shipState = "normal";     //State of ship's speed and damage intake.
+		this.bulletState = "normal";   //State of ship's bullet functions.
+		this.trigX = Math.cos((this.rotation - 135)* TO_RADIANS); //Horizontal vector of ship's direction.
+		this.trigY = Math.sin((this.rotation - 135)* TO_RADIANS); //Vertical vector of ship's direction.
+		
+		/*-| THIS FUNCTION DETERMINES THE ACTION OF THE SHIP AFTER A CONTROL HAS BEEN PRESSED|-*/
+		this.move = function()
+		{		
+			/*-----------------------------------------------------------------------------------*\
+			|TRIGONOMETRIC MOVEMENT: SHIP ROTATES LEFT/RIGHT WHEN THE CORRESPONDING KEY IS PRESSED|
+			\*-----------------------------------------------------------------------------------*/
+			
+			//The change of movement for the gunship is determined by the vectors of the gunship
+			//and the speed of the gunship itself.
+			this.x += (this.trigX * this.speed);
+			this.y += (this.trigY * this.speed);
+			
+			/*-----------------------------------------------------------------------------------*/
+			
+			limits(this); //Checks if the ship is within the canvas's boundaries.
+		}
+	}
+	
+	function Enemies(dx, dy, dt, dp)
+	{
+		this.myImage = new Image();
+		this.myImage.src = dp;
+		this.x = dx;   //x position of where the enemy spawns.
+		this.y = dy;   //y position of where the enemy spawns.
+		this.ecks = 0; //Horizontal speed of enemy.
+		this.why = 0;  //Vertical speed of enemy.
+		this.threshold = dt; //The max speed the alien can reach.
+		
+		this.move = function()
+		{
+			//The speeds are divided by two when the threshold is reached so enemies don't move too fast.
+			if (Math.abs(this.ecks) > this.threshold) //Speed is halved if enemy "exceeds" the threshold.
+				this.ecks /= 2;
+			if (Math.abs(this.why) > this.threshold)
+				this.why /= 2;
+				
+		
+			//These values can change by a random number from -1 to 1. This is done to create a
+			//dispersion effect.
+			this.ecks += (Math.random() * 2) - 1;
+			this.why += (Math.random() * 2) - 1;
+			
+			this.x += this.ecks;
+			this.y += this.why;
+			alienLimits(this); //Checks if the enemy is within the canvas's boundaries.
+		}
+	}
+	
+	function Bullets(dx, dy, dr, ds)
+	{
+		this.myImage = new Image();
+		this.myImage.src = preload[5];
+		this.x = dx;         //x-position of bullet.
+		this.y = dy;         //y-position of bullet.
+		this.rotation = dr;  //Rotation factor for guided bullets.
+		this.speed = ds;     //How fast the bullet travels.
+		this.trigX = Math.cos((this.rotation)* TO_RADIANS); //Horizontal vector of bullet's direction.
+		this.trigY = Math.sin((this.rotation)* TO_RADIANS); //Vertical vector of bullet's direction.
+		
+		//The change of movement for the bullet is determined by the vectors of the bullet
+		//and the speed of the bullet itself.
+		this.move = function()
+		{
+			this.x += (this.trigX * this.speed);    
+			this.y += (this.trigY * this.speed);
+		}
+	}
+
+	
+	function fireBullet()
+	{
+		if (p1Bullets.length <= BULLET_LIMIT && player1.ammunition > 0) //Fire if you still have ammo!
+		{
+			if (player1.bulletState != "control" || p1Bullets.length == 0) //Guided bullets are only fired if no bullets are on screen. Done to prevents chaos with other bullets on screen.
+			{
+				p1Bullets.push(new Bullets(player1.x, player1.y, player1.rotation + 225, UNCONTROLLED_BULLET_SPEED));  //Fire bullet.
+				//FIRE THE BULLET THE SAME DIRECTION AS WHERE THE SHIP'S GUN IS POINTING AT.
+				p1Bullets[(p1Bullets.length) - 1].trigX =
+				Math.cos((player1.rotation - 135)* TO_RADIANS);
+							
+				p1Bullets[(p1Bullets.length) - 1].trigY = 
+				Math.sin((player1.rotation - 135)* TO_RADIANS);
+				if (player1.bulletState != "control")
+					player1.ammunition--;
+				else
+					player1.ammunition-=5;
+				gunfire.currentTime = 0;  //Play gunfire sound! Reset sound when you fire again.
+				gunfire.play();
+				gunfire.volume = 0.2;
+			}
+			//ACTIVATE PROPERTIES OF CONTROLLED BULLET (SWITCH CONTROLS AND BULLET SPEED).
+			if (controlBulletFired == false && player1.bulletState == "control")
+			{
+				controlBulletFired = true;
+				p1Bullets[0].speed = CONTROLLED_BULLET_SPEED;
+			}
+			else if (controlBulletFired == true && player1.bulletState == "control")  //DESTROY GUIDED BULLET. (SAFETY FEATURE FOR IF THE SHIP IS IN A DANGEROUS SITUATION).
+			{
+				p1Bullets.splice(0, 1)
+				controlBulletFired = false;
+			}
+						
+			if (player1.bulletState == "spread")       //FIRE TWO OTHER BULLETS IF AT SPREADSHOT.
+			{	//FIRE SECOND BULLET 22.5 DEGREES LEFTWARD OF SHIP'S GUN.
+				p1Bullets.push(new Bullets(player1.x, player1.y, player1.rotation + 225, UNCONTROLLED_BULLET_SPEED));
+				p1Bullets[(p1Bullets.length) - 1].trigX = 
+				Math.cos((player1.rotation - 112.5)* TO_RADIANS);
+						
+				p1Bullets[(p1Bullets.length) - 1].trigY = 
+				Math.sin((player1.rotation - 112.5)* TO_RADIANS);
+				player1.ammunition--;
+				//FIRE THIRD BULLET 22.5 DEGREES RIGHTWARD OF SHIP'S GUN.
+				p1Bullets.push(new Bullets(player1.x, player1.y, player1.rotation + 225, UNCONTROLLED_BULLET_SPEED));
+				p1Bullets[(p1Bullets.length) - 1].trigX = 
+				Math.cos((player1.rotation - 157.5)* TO_RADIANS);
+						
+				p1Bullets[(p1Bullets.length) - 1].trigY = 
+				Math.sin((player1.rotation - 157.5)* TO_RADIANS);
+				player1.ammunition--;
+			}
+		}
+	}
+	/***********************************************************\
+	|STATE CHANGE FUNCTIONS                                     |
+	|These change basic properties of the ship's properties. Not|
+	|Bullet properties since those changes are applied elsewhere|
+	|Image and state variables of ships change depending on your|
+	|current states before the changes.                         |
+	\***********************************************************/
+	function changetoReg()
+	{
+		if (player1.bulletState == "normal")
+			player1.myImage.src = preload[0];
+		else if (player1.bulletState == "spread")
+			player1.myImage.src = preload[6];
+		else
+			player1.myImage.src = preload[7]
+		player1.shipState = "normal";
+		player1.maxspeed = NORMAL_MAX_SPEED;
+		player1.rotationSpeed = NORMAL_ROTATION_SPEED;
+		player1.damagetaken = NORMAL_DAMAGE_TAKEN;
+		CURRENT_ROTATION_MULTIPLIER = NORMAL_ROTATION_MULTIPLIER;
+		CURRENT_SPEED_MULTIPLIER = NORMAL_SPEED_MULTIPLIER;
+		
+		if (player1.speed > player1.maxspeed)   //Don't let the ship exceed it's new max speed.
+			player1.speed = player1.maxspeed;
+	}
+	
+	function changetoSpeed()
+	{
+		if (player1.bulletState == "normal")
+			player1.myImage.src = preload[8];
+		else if (player1.bulletState == "spread")
+			player1.myImage.src = preload[9];
+		else
+			player1.myImage.src = preload[10]
+		player1.shipState = "speed";
+		player1.maxspeed = FAST_MAX_SPEED;
+		player1.rotationSpeed = FAST_ROTATION_SPEED;
+		player1.damagetaken = FAST_DAMAGE_TAKEN;
+		CURRENT_ROTATION_MULTIPLIER = FAST_ROTATION_MULTIPLIER;
+		CURRENT_SPEED_MULTIPLIER = FAST_SPEED_MULTIPLIER;
+		//No speed check here. This state has the highest speed.
+	}
+	
+	function changetoDef()
+	{
+		if (player1.bulletState == "normal")
+			player1.myImage.src = preload[11];
+		else if (player1.bulletState == "spread")
+			player1.myImage.src = preload[12];
+		else
+			player1.myImage.src = preload[13]
+		player1.shipState = "def";
+		player1.maxspeed = SLOW_MAX_SPEED;
+		player1.rotationSpeed = SLOW_ROTATION_SPEED;
+		player1.damagetaken = SLOW_DAMAGE_TAKEN;
+		CURRENT_ROTATION_MULTIPLIER = SLOW_ROTATION_MULTIPLIER;
+		CURRENT_SPEED_MULTIPLIER = SLOW_SPEED_MULTIPLIER;
+		
+		if (player1.speed > player1.maxspeed)    //Don't let the ship exceed it's new max speed.
+			player1.speed = player1.maxspeed;
+	}
+	
+	function changetoNormal()
+	{
+		if (player1.shipState == "normal")
+			player1.myImage.src = preload[0];
+		else if (player1.shipState == "speed")
+			player1.myImage.src = preload[8];
+		else
+			player1.myImage.src = preload[11]
+		player1.bulletState = "normal";
+	}
+	
+	function changetoSpread()
+	{
+		if (player1.shipState == "normal")
+			player1.myImage.src = preload[6];
+		else if (player1.shipState == "speed")
+			player1.myImage.src = preload[9];
+		else
+			player1.myImage.src = preload[12]
+		player1.bulletState = "spread";
+	}
+	
+	function changetoControl()
+	{
+		if (player1.shipState == "normal")
+			player1.myImage.src = preload[7];
+		else if (player1.shipState == "speed")
+			player1.myImage.src = preload[10];
+		else
+			player1.myImage.src = preload[13]
+		player1.bulletState = "control";
+	}
+	
+	//BULLET GOES OUT THE STAGE AND IT'S GONE! Image properties are accounted for so it goes out "smoothly".
+	function bulletLimits(e)
+	{
+		if (e.x < -(e.myImage.width) || e.x > STAGE_WIDTH || e.y < -(e.myImage.height) || e.y > STAGE_HEIGHT)
+			return true;
+		else
+			return false;
+	}
+	
+	 /*-----------------------------------------------------------------------*/
+	 
+	//SHIP GOES OUT THE STAGE AND IT RETURNS ON THE "OTHER SIDE". Image properties are accounted for so it goes to the other side "smoothly".
+	function limits(e)
+	{
+		if (e.x < -(e.myImage.width/2))
+			e.x = STAGE_WIDTH;
+		if (e.x > STAGE_WIDTH)
+			e.x = 0;
+		if (e.y < -(e.myImage.height/2))
+			e.y = STAGE_HEIGHT;
+		if (e.y > STAGE_HEIGHT)
+			e.y = 0;
+	}
+	
+	//ALIENS GO OUT THE STAGE AND THEY RETURN ON THE "OTHER SIDE". Image properties are accounted for so they go to the other side "smoothly".
+	function alienLimits(e)
+	{
+		if (e.x < -(e.myImage.width))
+			e.x = STAGE_WIDTH;
+		if (e.x > STAGE_WIDTH)
+			e.x = 0;
+		if (e.y < -(e.myImage.height))
+			e.y = STAGE_HEIGHT;
+		if (e.y > STAGE_HEIGHT)
+			e.y = 0;
+	}
+	
+	//THIS FUNCTION DRAWS ALIENS AND DOES A HIT TEST FOR EACH GROUP OF ALIENS TO THE PLAYER.
+	function drawAliens(theElement, theIndex, theArray)
+	{
+		theArray[theIndex].move(); //Move aliens.
+		ctx.drawImage(theArray[theIndex].myImage, theArray[theIndex].x, theArray[theIndex].y); //Draw movement on canvas.
+		
+		if (player1 != false)     //Player not dead?
+		{
+			for (i = 0; i < theArray.length; i++)          //Perform hit test for every alien.
+			{
+				if (!invincibilityFrame)                   //Cancel test if player is invincible.
+				{
+					if (hitTest(theIndex, theArray, i, player1))     //Function call to actual hit test here.
+					{
+						health-=player1.damagetaken;        //Player takes damage.
+						invincibilityFrame = true;          //Indication that player is now invincible.
+						playerhit.currentTime = 0;          //Sound where player gets hit plays.
+						playerhit.play();
+						playerhit.volume = 0.2;
+						setTimeout(function(){invincibilityFrame = false;}, TIME_INVINCIBLE); //Invincibility frame ends after a certain amount of time.
+						if (health <= 0)             //Player ran out of health?
+						{
+							if (gamemode == "ranked")
+								finalTime = timeLeft;   //Record this for ranked mode point scheme.
+							player1 = delete GunShip;   //Player is dead.
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	function hitTest(i, arrayi, j, arrayj)
+	{
+		var rx1, ry1, rx2, ry2;     //Radius of two objects.
+		var hitThreshold;           //How close the object can go before hit test is true.
+		
+		if (arrayi instanceof Array)  //Object an array? Apply radius calculations with subscripts.
+		{
+			rx1 = arrayi[i].x + (arrayi[i].myImage.width/2);
+			ry1 = arrayi[i].y + (arrayi[i].myImage.height/2);
+		}
+		else                          //If not, do it without subscripts.
+		{
+			rx1 = arrayi.x + (arrayi.myImage.width/2);
+			ry1 = arrayi.y + (arrayi.myImage.height/2);
+		}
+		                            
+		if (arrayj instanceof Array)  //Object an array? Apply radius calculations with subscripts.
+		{
+			rx2 = arrayj[j].x + (arrayj[j].myImage.width/2);
+			ry2 = arrayj[j].y + (arrayj[j].myImage.height/2);
+			hitThreshold = arrayj[j].myImage.width/2;
+		}
+		else                          //If not, do it without subscripts.
+		{
+			rx2 = arrayj.x + (arrayj.myImage.width/2);
+			ry2 = arrayj.y + (arrayj.myImage.height/2);
+			hitThreshold = arrayj.myImage.width/2;
+		}
+		
+		var distance = Math.sqrt((rx1-rx2)*(rx1-rx2) + (ry1-ry2)*(ry1-ry2)); //Distance formula from math class.
+		
+		if (distance < hitThreshold)  //A "hit" occurs if the objects are close enough.
+			return true;
+		else
+			return false;
+	}
+	
+	//BULLET TO ALIEN HIT TEST.
+	function checkHit(theElement, theIndex, theArray)
+	{	//DRAW BULLETS HERE!
+		ctx.save();    //Save original canvas position.
+		theArray[theIndex].move();  //Apply bullet's movement.
+		ctx.translate(theArray[theIndex].x, theArray[theIndex].y);  //Put it in proper rotation position.
+		ctx.rotate(theArray[theIndex].rotation * TO_RADIANS);       //Rotate actual bullet.
+		ctx.drawImage(theArray[theIndex].myImage, -(theArray[theIndex].myImage.width/2), -(theArray[theIndex].myImage.height/2)) //Properties to draw trig movement
+		ctx.restore(); // Maintains canvas position.
+		
+		//BULLET GO OUT THE STAGE? DELETE IT.
+		if (bulletLimits(theArray[theIndex]))
+		{
+			theArray.splice(theIndex, 1);                      //Delete bullet.
+			if (controlBulletFired == true)                    //Give back control to player if a guided bullet went out.
+			{
+				controlBulletFired = false;
+				p1Bullets.speed = CONTROLLED_BULLET_SPEED;
+			}
+		}
+		
+		else
+		{
+			for (i = 0; i < enemiesL1.length; i++)             //Do hit test for bullet to alien.
+			{
+				if (hitTest(theIndex, theArray, i, enemiesL1)) //If a hit occurs...
+				{
+					score += Math.round(L1_POINT_BASE + ((enemiesL1[theIndex].threshold - STARTING_L1_THRESHOLD)/2)); //Increase score. Killing enemies with faster thresholds yield more points.
+					theArray.splice(theIndex, 1);             //Delete bullet.
+					enemiesL1.splice(i, 1);                   //Delete alien.
+					enemyhit.currentTime = 0;                 //Play sound indicating that enemy got hit.
+					enemyhit.play();
+					enemyhit.volume = 0.2;
+					if (controlBulletFired == true)           //Retain control of ship if guided bullet was used.
+						controlBulletFired = false;
+					killCount++;                              //Increase kill count.
+				} 
+			}
+			//SAME COMMENTS ABOVE APPLY FOR THE OTHER GROUPS OF ENEMIES!
+			for (i = 0; i < enemiesL2.length; i++)
+			{
+				if (hitTest(theIndex, theArray, i, enemiesL2))
+				{
+					score += Math.round(L2_POINT_BASE + ((enemiesL1[theIndex].threshold - STARTING_L2_THRESHOLD)/2));
+					theArray.splice(theIndex, 1);
+					enemiesL2.splice(i, 1);
+					enemyhit.currentTime = 0;
+					enemyhit.play();
+					enemyhit.volume = 0.2;
+					if (controlBulletFired == true)
+					{
+						controlBulletFired = false;
+						p1Bullets.speed = CONTROLLED_BULLET_SPEED;
+					}
+					killCount++;
+				}
+			}
+			
+			for (i = 0; i < enemiesL3.length; i++)
+			{
+				if (hitTest(theIndex, theArray, i, enemiesL3))
+				{
+					score += Math.round(L3_POINT_BASE + ((enemiesL1[theIndex].threshold - STARTING_L3_THRESHOLD)/2));
+					theArray.splice(theIndex, 1);
+					enemiesL3.splice(i, 1);
+					enemyhit.currentTime = 0;
+					enemyhit.play();
+					enemyhit.volume = 0.2;
+					if (controlBulletFired == true)
+					{
+						p1Bullets.speed = CONTROLLED_BULLET_SPEED;
+						controlBulletFired = false;
+					}
+					killCount++;
+				}
+			}
+			
+			for (i = 0; i < enemiesL4.length; i++)
+			{
+				if (hitTest(theIndex, theArray, i, enemiesL4))
+				{
+					score += Math.round(L4_POINT_BASE + ((enemiesL4[theIndex].threshold - STARTING_L4_THRESHOLD)/2));
+					theArray.splice(theIndex, 1);
+					enemiesL4.splice(i, 1);
+					enemyhit.currentTime = 0;
+					enemyhit.play();
+					enemyhit.volume = 0.2;
+					if (controlBulletFired == true)
+					{
+						controlBulletFired = false;
+						p1Bullets.speed = CONTROLLED_BULLET_SPEED;
+					}
+					killCount++;
+				}
+			}
+		}
+	}
+	
+	function draw()
+	{
+		ctx.clearRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT); //Done so duplicate images aren't produced.
+		
+		//Apply drawing and hit tests for enemies and bullets.
+		enemiesL1.forEach(drawAliens);
+		enemiesL2.forEach(drawAliens);
+		enemiesL3.forEach(drawAliens);
+		enemiesL4.forEach(drawAliens);
+		p1Bullets.forEach(checkHit);
+		
+		if (player1)
+		{
+			//ARE THEY IN THE AMMO ZONE WITH EMPTY AMMO?
+			if ((player1.x > (AMMO_X_MIN + player1.myImage.width/4)) && (player1.x < (AMMO_X_MAX - player1.myImage.width/4)) && 
+			(player1.y > (AMMO_Y_MIN + player1.myImage.height/4)) && (player1.y < (AMMO_Y_MAX - player1.myImage.height/4)) && (emptyAmmo == true)) 
+				//&&
+				//((player1.myImage.height/2) + player1.myImage.height/2) > AMMO_Y_MIN && ((player1.myImage.height/2) + player1.myImage.height/2) < AMMO_Y_MAX) && (emptyAmmo == true)))
+			{
+				if (player1.ammunition < MAX_AMMO) //Increase ammo until player reach maximum ammunition. 
+					player1.ammunition++;
+				else
+					emptyAmmo = false;             //Otherwise, don't let them increase ammo until empty again.
+			}
+			else //IF NOT, DON'T GIVE THEM AMMO.
+			{
+				emptyAmmo = false;
+			}
+		}
+		
+		if (player1)
+		{
+			if (controlBulletFired == false)
+			{
+				player1.rotation+=(rotationFactor * CURRENT_ROTATION_MULTIPLIER);
+				player1.trigX = Math.cos((player1.rotation - 135)* TO_RADIANS);
+				player1.trigY = Math.sin((player1.rotation - 135)* TO_RADIANS);
+			}
+			else                           //Otherwise, remote guided bullet moves right.
+			{
+				p1Bullets[0].rotation+=rotationFactor;
+				p1Bullets[0].trigX = Math.cos((p1Bullets[0].rotation)* TO_RADIANS);
+				p1Bullets[0].trigY = Math.sin((p1Bullets[0].rotation)* TO_RADIANS);
+			}
+
+			player1.speed = (speedFactor*CURRENT_SPEED_MULTIPLIER);
+		}
+		
+		if (player1) {                                                                     //If player is alive...
+			$('#Health').html("HEALTH: " + health + ", ");                                 //DISPLAY GAME PROPERTIES (HEALTH, AMMO, SCORE, TIME).
+			$('#Ammunition').html("AMMUNITION: " + player1.ammunition + " bullets, ");
+			$('#Score').html("SCORE: " + score + " points");
+			if (gamemode == "ranked")
+				$('#Timer').html(", TIMER: " + timeLeft.toFixed(2) + " seconds");
+			
+			if (player1.ammunition <= 0)                 //If ammo is empty, Indicate that by coloring Ammo property red.
+			{
+				player1.ammunition = 0;
+				$('#Ammunition').css("color", "red");
+				emptyAmmo = true                         //Let player get ammo if they go in the ammo zone.
+			}
+			else if (player1.ammunition < MAX_AMMO)      //If ammo isn't empty or full, Indicate that by coloring Ammo property white.
+			{
+				$('#Ammunition').css("color", "white");
+			}
+			else                                         //If ammo is full, Indicate that by coloring Ammo property gold.
+			{
+				$('#Ammunition').css("color", "rgb(255,200,0)");
+			}
+			
+			//DISPLAY CURRENT SHIP STATE. MAKE COLOR OF TEXT STATUS EQUIVALENT TO SHIP COLOR.
+			if (player1.shipState == "normal")
+			{
+				$('#Type').html("SHIP TYPE: NORMAL, ")
+				$('#Type').css("color", "rgb(255,0,0)");
+			}
+			else if (player1.shipState == "speed")
+			{
+				$('#Type').html("SHIP TYPE: SPEEDY, ")
+				$('#Type').css("color", "rgb(0,255,0)");
+			}
+			else
+			{
+				$('#Type').html("SHIP TYPE: DEFENSIVE, ")
+				$('#Type').css("color", "rgb(0,0,255)");
+			}
+			
+			//DISPLAY CURRENT BULLET STATE. MAKE COLOR OF TEXT STATUS EQUIVALENT TO SHIP'S BEAM COLOR.
+			if (player1.bulletState == "normal")
+			{
+				$('#BulletType').html("BULLET TYPE: NORMAL, ")
+				$('#BulletType').css("color", "rgb(0,255,0)");
+			}
+			else if (player1.bulletState == "spread")
+			{
+				$('#BulletType').html("BULLET TYPE: SPREADSHOT, ")
+				$('#BulletType').css("color", "rgb(0,0,255)");
+			}
+			else
+			{
+				$('#BulletType').html("BULLET TYPE: REMOTE-GUIDED, ")
+				$('#BulletType').css("color", "rgb(255,0,0)");
+			}
+			
+			//DISPLAY CURRENT SONG BEING PLAYED.
+			if (musicState == 1)
+				$('#Soundtrack').html("SOUNDTRACK: 1 (GRIM)");
+			else if (musicState == 2)
+				$('#Soundtrack').html("SOUNDTRACK: 2 (DETERMINED)");
+			else
+				$('#Soundtrack').html("SOUNDTRACK: 3 (SOOTHING)");
+				
+			$('#spdfactor').html("SPEED FACTOR: " + speedFactor + ", ");
+			
+			if (rotationFactor == 0)
+				$('#rtnfactor').html("ROTATION FACTOR: " + rotationFactor);
+			else if (rotationFactor > 0)
+				$('#rtnfactor').html("ROTATION FACTOR: " + rotationFactor + " TO THE RIGHT");
+			else 
+				$('#rtnfactor').html("ROTATION FACTOR: " + Math.abs(rotationFactor) + " TO THE LEFT");
+		}
+		//else {
+		//}
+				
+		//IN RANKED MODE, CHANGE COLOR OF SCORE PROPERTY TO INDICATE THEIR CURRENT RANK.
+		if (gamemode == "ranked")
+		{
+			if (score >= S_RANK_REQUIREMENT)                       //S (highest) Rank is gold.
+				$('#Score').css("color", "rgb(255,200,0)");
+			else if (score >= A_RANK_REQUIREMENT)                  //A Rank is purple.
+				$('#Score').css("color", "rgb(210,106,255)");
+			else if (score >= B_RANK_REQUIREMENT)                  //B Rank is blue.
+				$('#Score').css("color", "rgb(0,0,255)");
+			else if (score >= C_RANK_REQUIREMENT)                  //C Rank is green.
+				$('#Score').css("color", "rgb(0,255,0)");
+			else if (score >= D_RANK_REQUIREMENT)                  //D Rank is orange.
+				$('#Score').css("color", "rgb(255,128,0)");
+			else                                                   //E (lowest) Rank is white.
+				$('#Score').css("color", "rgb(255,255,255)");
+		}
+		
+		//RESPAWN ENEMIES IN SPECIFIC SPOT IF A CERTAIN GROUP OF THEM ARE AT A LOW ENOUGH QUANTITY.
+		if (enemiesL1.length < MIN_L1_ENEMIES)
+		{
+			for (var i = 0; i < REGEN_L1_ENEMIES; i++)
+				enemiesL1.push(new Enemies(ENEMY_SPAWN_X, ENEMY_SPAWN_Y, STARTING_L1_THRESHOLD + ((killCount/SPEED_INCREASE_RATE)/2), preload[1]));
+		}
+		
+		if (enemiesL2.length < MIN_L2_ENEMIES)
+		{
+			for (var i = 0; i < REGEN_L2_ENEMIES; i++)
+				enemiesL2.push(new Enemies(ENEMY_SPAWN_X, ENEMY_SPAWN_Y, STARTING_L2_THRESHOLD + ((killCount/SPEED_INCREASE_RATE)/1.5), preload[2]));
+		}
+		
+		if (enemiesL3.length < MIN_L3_ENEMIES)
+		{
+			for (var i = 0; i < REGEN_L3_ENEMIES; i++)
+				enemiesL3.push(new Enemies(ENEMY_SPAWN_X, ENEMY_SPAWN_Y, STARTING_L3_THRESHOLD + ((killCount/SPEED_INCREASE_RATE)/1.25), preload[3]));
+		}
+		
+		if (enemiesL4.length < MIN_L4_ENEMIES)
+		{
+			for (var i = 0; i < REGEN_L4_ENEMIES; i++)
+				enemiesL4.push(new Enemies(ENEMY_SPAWN_X, ENEMY_SPAWN_Y, STARTING_L4_THRESHOLD + (killCount/2.5), preload[4]));
+		}
+		
+		if (gamemode == "ranked")
+			timeLeft -= (1/30);     //Divide 1 by the frames used in setInterval to simulate a seconds timer.
+		
+		if (!player1 || (gamemode == "ranked" && timeLeft <= 0)) {   //Game ends in ranked if time elapsed (if player hasn't died yet).
+			if (timeLeft <= 0)
+				finalTime = 0;
+			gameOver();
+		}
+		//DRAWING METHODS FOR TRIGONOMETRIC MOVEMENT
+		if (player1 != false)     //Only draws Player 1 if alive.
+		{
+			ctx.save();
+			player1.move();
+			ctx.translate(player1.x, player1.y);
+			ctx.rotate(player1.rotation * TO_RADIANS);
+			
+			jx = (jcount % 2) * 32;                 //Get current frame column.
+			jy = Math.floor(jcount / 2) * 32;       //Get current frame row.
+		
+			//This draw image combines trigonometric movement and spritesheet integration.
+			//player1.myImage.width/2 is meant for the trig movement itself
+			//(player1.myImage.width/2)/2 is meant for the spritesheet frames. these numbers needs to be changed depending on
+			//how many frame rows and frame heights there are!
+			ctx.drawImage (player1.myImage, jx, jy, 32, 32, -((player1.myImage.width/2)/2), -((player1.myImage.height/2)/2), 32, 32);
+			
+			jcount++;		 //Go to next frame.
+			if (jcount > 3)  //Exceeded last frame?
+				jcount = 0;  //If so, start again at first.
+
+			//ctx.drawImage (player1.myImage, -(player1.myImage.width/2), -(player1.myImage.height/2))
+			ctx.restore();
+		}
+	}
+
+	</script>
+</head>
+<body onload = "init()">
+	<canvas class="border" id="myCanvas">
+	</canvas><div id="Speed"></div><div id="Rotation"></div></br>
+	<span>CONTROL PANEL: </span>
+	<span class="border">
+	<table>
+		<tr>
+			<td><span style="width:150px">SELECT DIFFICULTY: </td>
+			<td><input type="button" id="GAMEeasy"   value="Easy" style="width:150px"></input></td>
+			<td><input type="button" id="GAMEnormal" value="Normal" style="width:150px"></input></td>
+			<td><input type="button" id="GAMEhard"   value="Hard" style="width:150px"></input></td>
+			<td><input type="button" id="GAMEranked" value="Ranked" style="width:150px"></input></td>
+		</tr>
+		<tr>
+			<td><span style="width:150px">SHIP STATE: </td>
+			<td><input type="button" id="SHIPreg" value="Regular" style="width:150px"></input></td>
+			<td><input type="button" id="SHIPspd" value="Speedy" style="width:150px"></input></td>
+			<td><input type="button" id="SHIPdef" value="Defensive" style="width:150px"></input></td>
+		</tr>
+		<tr>
+			<td><span style="width:150px">BULLET STATE: </td>
+			<td><input type="button" id="BULLETreg" value="Regular" style="width:150px"></input></td>
+			<td><input type="button" id="BULLETspr" value="Spreadshot" style="width:150px"></input></td>
+			<td><input type="button" id="BULLETrem" value="Remote-Guided" style="width:150px"></input></td>
+		</tr>
+		<tr>
+			<td><span style="width:150px">SOUNDTRACK: </td>
+			<td><input type="button" id="MUSICone"   value="#1 (GRIM)" style="width:150px"></input></td>
+			<td><input type="button" id="MUSICtwo"   value="#2 (DETERMINED)" style="width:150px"></input></td>
+			<td><input type="button" id="MUSICthree" value="#3 (SOOTHING)" style="width:150px"></input></td>
+		</tr>
+		<tr>
+			<td><span style="width:150px">OTHER CONTROLS: </td>
+			<td><input type="button" id="SHOOT"     value="Fire Bullet" style="width:150px"></input></td>
+			<td><input type="button" id="QUIT"      value="End Game" style="width:150px"></input></td>
+			<td><input type="button" id="BCKtoMAIN" value="Back to Instructions" style="width:150px"></input></td>
+		</tr>
+	</table>
+	<span id="spdfactor"></span><span id="rtnfactor"></span></br>
+	<span id="Health"></span><span id="Ammunition"></span>
+	<span id="Score"></span><span id="Timer"></span></br>
+	<span id="Type"></span><span id="BulletType"></span><span id="Soundtrack"></span>
+</body>
+</html>
